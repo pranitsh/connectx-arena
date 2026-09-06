@@ -62,7 +62,8 @@ def validate_payload(board_state, agent_name):
 
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
-    enforce_app_check=True 
+    enforce_app_check=True,
+    memory=1024
 )
 def get_ai_move(req: https_fn.Request) -> dict:
     import numpy as np
@@ -88,7 +89,7 @@ def get_ai_move(req: https_fn.Request) -> dict:
         
         if doc.exists:
             last_request = doc.to_dict().get("last_request", 0)
-            if current_time - last_request < 0.5:
+            if current_time - last_request < 0.1:
                 raise ValueError("Rate limit exceeded.")
         
         rate_limit_ref.set({"last_request": current_time})
