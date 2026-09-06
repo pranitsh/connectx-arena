@@ -3,14 +3,15 @@ import time
 import json
 import random
 import traceback
-import numpy as np
 import concurrent.futures
 from firebase_functions import https_fn, options
 from firebase_admin import initialize_app, firestore
-from stable_baselines3 import DQN
 
-initialize_app()
-db = firestore.client()
+# MUST be in global scope for the @on_call decorator to validate tokens
+try:
+    initialize_app()
+except ValueError:
+    pass
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 
@@ -23,8 +24,16 @@ AGENT_FILES = {
 }
 
 loaded_models = {}
+_db = None
+
+def get_db():
+    global _db
+    if _db is None:
+        _db = firestore.client()
+    return _db
 
 def get_model(agent_name):
+    from stable_baselines3 import DQN
     if agent_name not in loaded_models:
         model_path = os.path.join(ASSETS_DIR, AGENT_FILES[agent_name])
         loaded_models[agent_name] = DQN.load(model_path, device="cpu")
@@ -53,9 +62,11 @@ def validate_payload(board_state, agent_name):
 
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
-    enforce_app_check=True  # Switch to True before deploying to production
+    enforce_app_check=True 
 )
 def get_ai_move(req: https_fn.Request) -> dict:
+    import numpy as np
+    
     try:
         if req.auth is None:
             raise ValueError("User must be authenticated.")
@@ -70,7 +81,7 @@ def get_ai_move(req: https_fn.Request) -> dict:
         # 1. Strict Payload Defense
         validate_payload(board_state, agent_name)
 
-        # 2. Firestore Rate Limiting
+        db = get_db()
         rate_limit_ref = db.collection("rate_limits").document(uid)
         doc = rate_limit_ref.get()
         current_time = time.time()
