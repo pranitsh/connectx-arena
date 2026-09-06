@@ -1,0 +1,17 @@
+{
+  "name": "connectx-arena",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "npx serve public",
+    "emulators": "firebase emulators:start",
+    "deploy:firebase": "firebase deploy",
+    "deploy:github": "gh-pages -d public"
+  },
+  "dependencies": {
+    "firebase": "^11.9.1"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.3.0"
+  }
+}

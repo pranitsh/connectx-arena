@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; connect-src 'self' 'unsafe-inline' https: http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:;">
+    <title>ConnectX Arena</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-XXXXXXXXXX');
+    </script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center justify-between p-4">
+
+    <header class="w-full max-w-xl text-center py-4">
+        <h1 class="text-3xl font-extrabold tracking-wider text-indigo-400">CONNECTX ARENA</h1>
+        <p class="text-sm text-slate-400 mt-1">Play against pre-trained Stable-Baselines3 agents</p>
+    </header>
+
+    <main class="w-full max-w-xl bg-slate-800 p-6 rounded-2xl shadow-xl flex flex-col items-center space-y-6">
+        
+        <div class="w-full flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+            <div class="w-full sm:w-auto flex-1">
+                <label for="agentSelect" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Select Opponent</label>
+                <select id="agentSelect" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                    <option value="mlp-small">mlp-small ([64, 64])</option>
+                    <option value="mlp-medium">mlp-medium ([40, 40, 40, 40])</option>
+                    <option value="mlp-large">mlp-large ([32, 32, 32, 32, 32, 32])</option>
+                    <option value="cnn-small">cnn-small (16 filters)</option>
+                    <option value="cnn-large">cnn-large (32 filters)</option>
+                </select>
+            </div>
+            <button id="resetBtn" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition-colors mt-auto">
+                New Game
+            </button>
+        </div>
+
+        <div id="gameStatus" class="text-sm font-medium text-indigo-300 h-6 flex items-center justify-center">
+            Initializing secure session...
+        </div>
+
+        <div id="board" class="grid grid-cols-7 gap-2 bg-indigo-950 p-4 rounded-xl shadow-inner border-2 border-indigo-900">
+            <!-- Dynamically generated via JS -->
+        </div>
+
+    </main>
+
+    <footer class="w-full max-w-xl text-center py-4 text-xs text-slate-500">
+        Secured with Firebase Anonymous Auth & App Check
+    </footer>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
+        import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app-check.js";
+        import { getFunctions, connectFunctionsEmulator, httpsCallable } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-functions.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyB2VHUyx8Uk1rVMUvaDxqPJ_y-23WjuW_k",
+            authDomain: "connectx-arena.firebaseapp.com",
+            projectId: "connectx-arena",
+            storageBucket: "connectx-arena.firebasestorage.app",
+            messagingSenderId: "396746090248",
+            appId: "1:396746090248:web:5f0494715355cf5749eebd",
+            measurementId: "G-3X38TZVJCM"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const functions = getFunctions(app);
+
+        const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+
+        if (isLocal) {
+            connectAuthEmulator(auth, "http://localhost:9099");
+            connectFunctionsEmulator(functions, "localhost", 5001);
+            
+            // Pass the exact registered token string instead of 'true'
+            self.FIREBASE_APPCHECK_DEBUG_TOKEN = "0e5bd429-280d-4bb0-b981-e69ca8e41d53";
+        }
+
+        try {
+            initializeAppCheck(app, {
+                provider: new ReCaptchaEnterpriseProvider('6LeYg6gtAAAAADrdNjUf8B_YVoBUypkuootEbw9M'),
+                isTokenAutoRefreshEnabled: true
+            });
+        } catch (e) {
+            console.warn("App Check initialization note:", e);
+        }
+
+        signInAnonymously(auth).catch(error => {
+            console.error("Auth error:", error);
+            document.getElementById('gameStatus').innerText = "Auth failed. Please refresh.";
+        });
+
+        const ROWS = 6;
+        const COLS = 7;
+        let boardState = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
+        let isGameActive = false;
+        
+        let currentPlayer = 1;
+
+        const boardElement = document.getElementById('board');
+        const statusElement = document.getElementById('gameStatus');
+        const agentSelect = document.getElementById('agentSelect');
+
+        function createBoardUI() {
+            boardElement.innerHTML = '';
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'w-10 h-10 sm:w-12 sm:h-12 bg-slate-900 rounded-full cursor-pointer flex items-center justify-center transition-all hover:bg-slate-800';
+                    cell.addEventListener('click', () => handleColumnClick(c));
+                    
+                    const disc = document.createElement('div');
+                    disc.id = `cell-${r}-${c}`;
+                    disc.className = 'w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-950 transition-transform duration-300 scale-0';
+                    cell.appendChild(disc);
+                    boardElement.appendChild(cell);
+                }
+            }
+        }
+
+        function updateBoardUI() {
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const disc = document.getElementById(`cell-${r}-${c}`);
+                    disc.className = 'w-8 h-8 sm:w-10 sm:h-10 rounded-full transition-transform duration-300 ';
+                    if (boardState[r][c] === 1) disc.classList.add('bg-amber-400', 'scale-100', 'shadow-lg');
+                    else if (boardState[r][c] === 2) disc.classList.add('bg-rose-500', 'scale-100', 'shadow-lg');
+                    else disc.classList.add('bg-slate-950', 'scale-0');
+                }
+            }
+        }
+
+        function checkWin(player) {
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (c < COLS - 3 && boardState[r][c] === player && boardState[r][c+1] === player && boardState[r][c+2] === player && boardState[r][c+3] === player) return true;
+                    if (r < ROWS - 3 && boardState[r][c] === player && boardState[r+1][c] === player && boardState[r+2][c] === player && boardState[r+3][c] === player) return true;
+                    if (r < ROWS - 3 && c < COLS - 3 && boardState[r][c] === player && boardState[r+1][c+1] === player && boardState[r+2][c+2] === player && boardState[r+3][c+3] === player) return true;
+                    if (r < ROWS - 3 && c >= 3 && boardState[r][c] === player && boardState[r+1][c-1] === player && boardState[r+2][c-2] === player && boardState[r+3][c-3] === player) return true;
+                }
+            }
+            return false;
+        }
+
+        function getAvailableRow(col) {
+            for (let r = ROWS - 1; r >= 0; r--) {
+                if (boardState[r][col] === 0) return r;
+            }
+            return -1;
+        }
+
+        async function triggerAiMove() {
+            if (!isGameActive) return;
+            
+            currentPlayer = 1;
+            statusElement.innerText = "AI is thinking (Yellow)...";
+
+            try {
+                const getAiMove = httpsCallable(functions, 'get_ai_move');
+                const response = await getAiMove({ 
+                    board: boardState, 
+                    agent: agentSelect.value 
+                });
+                
+                const aiCol = response.data.column;
+                const aiRow = getAvailableRow(aiCol);
+                
+                if (aiRow !== -1) {
+                    boardState[aiRow][aiCol] = 1;
+                    updateBoardUI();
+                    
+                    if (checkWin(1)) {
+                        statusElement.innerText = "AI wins!";
+                        isGameActive = false;
+                        return;
+                    } else if (boardState[0].every(cell => cell !== 0)) {
+                        statusElement.innerText = "It's a draw!";
+                        isGameActive = false;
+                        return;
+                    }
+
+                    currentPlayer = 2;
+                    statusElement.innerText = "Your turn (Red)";
+                }
+            } catch (error) {
+                console.error("AI Move failed:", error);
+                statusElement.innerText = "Error contacting AI. Try again.";
+            }
+        }
+
+        async function handleColumnClick(col) {
+            if (!isGameActive || currentPlayer !== 2) return; 
+
+            const targetRow = getAvailableRow(col);
+            if (targetRow === -1) return; 
+
+            boardState[targetRow][col] = 2; 
+            updateBoardUI();
+            
+            if (checkWin(2)) {
+                statusElement.innerText = "You win!";
+                isGameActive = false;
+                return;
+            } else if (boardState[0].every(cell => cell !== 0)) {
+                statusElement.innerText = "It's a draw!";
+                isGameActive = false;
+                return;
+            }
+
+            triggerAiMove();
+        }
+
+        function resetGame() {
+            boardState = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
+            isGameActive = true;
+            updateBoardUI();
+            triggerAiMove(); 
+        }
+
+        document.getElementById('resetBtn').addEventListener('click', resetGame);
+        agentSelect.addEventListener('change', resetGame);
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                createBoardUI();
+                resetGame();
+            }
+        });
+    </script>
+</body>
+</html>
